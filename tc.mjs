@@ -228,6 +228,9 @@ function noteValue(identity) {
   ];
   if (identity.xHandle) fields.push(`x:@${identity.xHandle}`);
   if (identity.contributionUrl) fields.push(`contribution:${identity.contributionUrl}`);
+  // The announcement is a separate claim from the artifact: only the holder of
+  // the account can publish it, so it is the stronger of the two attestations.
+  if (identity.postUrl) fields.push(`post:${identity.postUrl}`);
   const value = fields.join(' ');
   assertSweepSafe(value, 'DID note value');
   if (value.length > 8192) throw new Error('DID note value exceeds 8192 characters.');
@@ -667,6 +670,7 @@ const commands = {
     const identity = loadIdentity();
     if (process.argv.includes('--x')) identity.xHandle = (argOf('x') || '').replace(/^@/, '') || null;
     if (process.argv.includes('--contribution')) identity.contributionUrl = argOf('contribution') || null;
+    if (process.argv.includes('--post')) identity.postUrl = argOf('post') || null;
     if (process.argv.includes('--agent')) identity.agentName = argOf('agent');
     noteValue(identity); // fail before saving if the result would be unpublishable
     saveIdentity(identity);
@@ -688,7 +692,7 @@ if (!isMain) {
                                                      dry run: show every URL and string
   node tc.mjs publish --confirm                      send the reviewed plan, unchanged
   node tc.mjs plan-clear                             discard a reviewed plan
-  node tc.mjs set [--x <handle>] [--contribution <url>] [--agent <name>]
+  node tc.mjs set [--x <handle>] [--contribution <url>] [--post <url>] [--agent <name>]
                                                      edit the public profile (no key access)
   node tc.mjs verify [--fingerprint <fp>]            read back, detect tampering, self-test
   node tc.mjs export-public [--out <file>]           write agent.public.json for CI (no key)
