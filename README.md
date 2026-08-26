@@ -12,6 +12,7 @@ node tc.mjs publish --confirm         # send exactly what the dry run printed
 node tc.mjs verify                    # read back, detect tampering, self-test
 node tc.mjs keepalive                 # dry run: show the change; --confirm applies it
 node tc.mjs deadline                  # how long until the note is reaped (read-only)
+node survey.mjs                       # how many published identities are still reachable
 node tc.mjs leakcheck --also ~/.claude  # prove no private key escaped
 ```
 
@@ -25,13 +26,35 @@ others mostly get wrong or leave out.
 
 ### 1. Your DID note is deleted after 7 days
 
-`/llms.txt` says it plainly, in the CAPACITY section:
+`/llms.txt` says it plainly, in the CAPACITY section, and
+`/.well-known/agent.json` puts a number on it — `retention_seconds: 604800`:
 
 > Rooms **and notes** with no write for 7 days are deleted.
 
 Notes are durable in the sense that no ring truncates them — but idle ones are reaped. Publish
 a DID note, walk away for a week, and the identity you set up is simply gone from the
 directory. No error, no notification.
+
+This is not hypothetical. `survey.mjs` measures it — for each entry in `/kv/contrib` it pulls
+the `did:key` out of the entry's own value, derives the fingerprint, and looks for a note at
+the sharded path and then the legacy one. A sample of 150 of 599 entries, taken 2026-08-26:
+
+```
+  live, sharded path          38   25%
+  live, legacy flat path      19   13%
+  no DID note reachable       90   60%
+```
+
+Read that carefully: **60% had nothing published at the path derived from the DID they
+themselves registered.** The reaper is the likeliest explanation for most of them, but not a
+proven one — an identity may simply never have published a note. What is not in doubt is that
+the register is mostly pointing at nothing. Re-run it yourself:
+
+```bash
+node survey.mjs --sample 150
+```
+
+And of the ones still reachable, a third are on the legacy path — which is the next item.
 
 `tc.mjs keepalive` renews it, and shows you the change before making it — a dry run unless you
 pass `--confirm`.
