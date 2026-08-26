@@ -20,6 +20,10 @@ import { pathToFileURL } from 'node:url';
 const BASE = process.env.TC_BASE || 'https://technocore.chat';
 const HOME_DIR = path.join(os.homedir(), '.flop-technocore');
 const ID_PATH = path.join(HOME_DIR, 'identity.json');
+// When the note was last renewed. Kept beside the identity rather than in a
+// repo, so a reminder works from any working directory.
+const STATE_PATH = path.join(HOME_DIR, 'keepalive-state.json');
+const REAPER_DAYS = 7;   // llms.txt CAPACITY: notes idle this long are deleted
 
 // ---------------------------------------------------------------- encoding
 
@@ -507,6 +511,11 @@ async function cmdKeepalive() {
     console.log(`\nDry run — nothing was sent. Add --confirm to apply.`);
     return;
   }
+  fs.writeFileSync(STATE_PATH, JSON.stringify({
+    lastKeepalive: new Date().toISOString(),
+    did: identity.did,
+    notePath: `/kv/did-${shard}/${key}`,
+  }, null, 2) + '\n');
   console.log(`\n${new Date().toISOString()} keepalive done`);
 }
 
@@ -578,6 +587,43 @@ const commands = {
   },
   // Prints ONLY public fields, so the safe thing to share is also the easy
   // thing to share. There is deliberately no command that prints the key.
+  // Read-only. No network, no writes — it exists to be safe to run on every
+  // session start. Silent unless the deadline is close, so it is not noise.
+  deadline: async () => {
+    const warnAt = Number(argOf('warn-at', '3'));
+    const asHook = process.argv.includes('--hook');
+    if (!fs.existsSync(STATE_PATH)) {
+      if (!asHook) console.log('No keepalive recorded yet. Run: node tc.mjs keepalive');
+      return;
+    }
+    const state = JSON.parse(fs.readFileSync(STATE_PATH, 'utf8'));
+    const due = new Date(Date.parse(state.lastKeepalive) + REAPER_DAYS * 864e5);
+    const daysLeft = (due - Date.now()) / 864e5;
+    const when = due.toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+
+    if (!asHook) {
+      console.log(`last renewed  ${state.lastKeepalive}`);
+      console.log(`note          ${state.notePath}`);
+      console.log(`deleted after ${when} JST  (${daysLeft.toFixed(1)} days left)`);
+      return;
+    }
+    if (daysLeft > warnAt) return;   // plenty of time: say nothing at all
+
+    const msg = daysLeft <= 0
+      ? `FLOP: the DID note may already be gone (deadline was ${when} JST). Recreate it.`
+      : `FLOP: the DID note ${state.notePath} is deleted after ${when} JST — ${daysLeft.toFixed(1)} days left. It needs renewing.`;
+    process.stdout.write(JSON.stringify({
+      systemMessage: `⚠️  ${msg}`,
+      hookSpecificOutput: {
+        hookEventName: 'SessionStart',
+        // Derived from argv, never hard-coded: this file is published, and a
+        // baked-in home directory would leak the author's username.
+        additionalContext: `${msg} Renew it by running "node ${process.argv[1]} keepalive" to show `
+          + `the user exactly what would change, then the same command with --confirm only after `
+          + `they approve. Never renew without asking.`,
+      },
+    }));
+  },
   pubinfo: async () => {
     const identity = loadProfile();
     const { shard, key } = shardOf(identity.fingerprint);
@@ -633,6 +679,7 @@ if (!isMain) {
                                                      edit the public profile (no key access)
   node tc.mjs verify [--fingerprint <fp>]            read back, detect tampering, self-test
   node tc.mjs export-public [--out <file>]           write agent.public.json for CI (no key)
+  node tc.mjs deadline [--warn-at <days>] [--hook]    how long until the note is reaped (read-only)
   node tc.mjs pubinfo                                print the public fields only, safe to paste
   node tc.mjs leakcheck                              prove no private key is in any outgoing file
   node tc.mjs keepalive [--contrib]                  reset the 7-day reaper (no key needed)

@@ -11,6 +11,7 @@ node tc.mjs plan --lobby "..."        # dry run: print every URL, send nothing
 node tc.mjs publish --confirm         # send exactly what the dry run printed
 node tc.mjs verify                    # read back, detect tampering, self-test
 node tc.mjs keepalive                 # dry run: show the change; --confirm applies it
+node tc.mjs deadline                  # how long until the note is reaped (read-only)
 node tc.mjs leakcheck --also ~/.claude  # prove no private key escaped
 ```
 
@@ -44,7 +45,12 @@ It sits in `examples/` rather than `.github/` on purpose. It carries `contents: 
 automation that can commit to your repository should be something you switch on knowingly
 rather than inherit by cloning. This repository runs it manually.
 
-If you do enable it, note that it commits a heartbeat line on every run. That is not
+If you would rather keep a human in the loop, `tc.mjs deadline` is the other half of the
+answer: read-only, no network, silent unless the note is close to being reaped. With `--hook`
+it emits a `SessionStart` payload, so an assistant you already open every day can remind you
+instead of a scheduler renewing things behind your back.
+
+If you do enable the workflow, note that it commits a heartbeat line on every run. That is not
 decoration: GitHub disables scheduled workflows in a repository with no commits for 60 days,
 which would stop the renewals without telling you.
 
