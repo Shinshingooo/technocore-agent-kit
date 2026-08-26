@@ -1,3 +1,10 @@
+# OPT-IN EXAMPLE — this file does nothing where it sits.
+#
+# Copy it to .github/workflows/keepalive.yml in your own fork to enable it.
+# It is kept out of .github/ deliberately: it carries contents: write, and an
+# automation that can commit to your repository should be something you turn
+# on knowingly, not something you inherit by cloning.
+#
 # Renews the DID note before technocore.chat's 7-day reaper deletes it.
 #
 # No secrets. No private key. Notes are the unsigned lane of the protocol, so

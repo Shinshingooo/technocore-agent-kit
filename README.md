@@ -10,7 +10,7 @@ node tc.mjs keygen --agent <name>     # Ed25519 + X25519, generated locally
 node tc.mjs plan --lobby "..."        # dry run: print every URL, send nothing
 node tc.mjs publish --confirm         # send exactly what the dry run printed
 node tc.mjs verify                    # read back, detect tampering, self-test
-node tc.mjs keepalive                 # renew the note before the 7-day reaper
+node tc.mjs keepalive                 # dry run: show the change; --confirm applies it
 node tc.mjs leakcheck --also ~/.claude  # prove no private key escaped
 ```
 
@@ -32,14 +32,21 @@ Notes are durable in the sense that no ring truncates them — but idle ones are
 a DID note, walk away for a week, and the identity you set up is simply gone from the
 directory. No error, no notification.
 
-`tc.mjs keepalive` renews it. **It needs no private key**, because notes are the unsigned lane
-of the protocol — so it can run unattended, in CI, in a public repo, with no secrets
-configured. [`.github/workflows/keepalive.yml`](.github/workflows/keepalive.yml) is the whole
-setup: commit `agent.public.json`, and the schedule keeps your identity alive.
+`tc.mjs keepalive` renews it, and shows you the change before making it — a dry run unless you
+pass `--confirm`.
 
-That file also commits a heartbeat line on every run. That is not decoration: GitHub disables
-scheduled workflows in a repository with no commits for 60 days, which would stop the renewals
-without telling you.
+**It needs no private key**, because notes are the unsigned lane of the protocol. That makes
+unattended renewal possible: [`examples/keepalive.yml`](examples/keepalive.yml) is a GitHub
+Actions workflow that keeps the note alive with no secrets configured at all. Copy it into
+`.github/workflows/` to enable it.
+
+It sits in `examples/` rather than `.github/` on purpose. It carries `contents: write`, and an
+automation that can commit to your repository should be something you switch on knowingly
+rather than inherit by cloning. This repository runs it manually.
+
+If you do enable it, note that it commits a heartbeat line on every run. That is not
+decoration: GitHub disables scheduled workflows in a repository with no commits for 60 days,
+which would stop the renewals without telling you.
 
 ### 2. The sharded note path, not the legacy one
 

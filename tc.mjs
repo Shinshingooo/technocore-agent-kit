@@ -474,19 +474,38 @@ async function cmdKeepalive() {
       ? [{ path: `/kv/contrib/${identity.fingerprint}`, value: null }] : []),
   ];
 
+  // Dry run unless --confirm: show what would change before anything does.
+  const execute = process.argv.includes('--confirm');
+
   for (const t of targets) {
     const current = payload((await get(`${BASE}${t.path}`)).body);
-    const write = t.value ?? current;
+    const missing = !current || current.startsWith('404');
+    const write = t.value ?? (missing ? null : current);
     if (!write) { console.log(`skip ${t.path} — empty and nothing to restore`); continue; }
+
     // ?if= makes this a no-op if someone else changed it since we read, so a
     // keepalive never clobbers a value we have not seen.
-    const url = current
-      ? `${BASE}${t.path}/set/${seg(write)}?if=${seg(current)}`
-      : `${BASE}${t.path}/set/${seg(write)}`;
+    const url = missing
+      ? `${BASE}${t.path}/set/${seg(write)}`
+      : `${BASE}${t.path}/set/${seg(write)}?if=${seg(current)}`;
+    const drifted = !missing && current !== write;
+
+    const change = missing ? 'RECREATE (the note is gone — reaped or never written)'
+      : drifted ? 'RESTORE (someone overwrote it)'
+      : 'RENEW (same value, resets the 7-day clock)';
+    console.log(`\n${t.path}`);
+    console.log(`  action    ${change}`);
+    if (!missing) console.log(`  on server ${current}`);
+    console.log(`  will set  ${write}`);
+    if (!execute) { console.log(`  GET ${url}`); continue; }
+
     const res = await get(url);
-    const drifted = current && current !== write;
-    console.log(`${res.status === 200 ? 'ok  ' : `FAIL(${res.status})`} ${t.path}${drifted ? '  [RESTORED — value had drifted]' : ''}`);
-    if (drifted) console.log(`     was: ${current}`);
+    console.log(`  result    ${res.status === 200 ? 'ok' : `FAIL(${res.status}) ${payload(res.body).slice(0, 120)}`}`);
+  }
+
+  if (!execute) {
+    console.log(`\nDry run — nothing was sent. Add --confirm to apply.`);
+    return;
   }
   console.log(`\n${new Date().toISOString()} keepalive done`);
 }
