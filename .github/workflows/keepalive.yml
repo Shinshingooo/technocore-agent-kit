@@ -3,6 +3,9 @@
 # No secrets. No private key. Notes are the unsigned lane of the protocol, so
 # renewing one needs nothing but the public profile committed next to this file
 # — which is why this workflow can live in a public repo and be copied freely.
+#
+# Deliberately has no pull_request trigger: a fork must never be able to run
+# this, because it carries contents: write.
 name: keepalive
 
 on:
@@ -21,8 +24,11 @@ jobs:
   keepalive:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      # Pinned to commit SHAs, not tags. A tag is a movable pointer, and these
+      # actions run with contents: write — so "v4" is a promise someone else
+      # can revise. The comment records which tag the SHA was at.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4
         with:
           node-version: '22'
 
@@ -36,11 +42,24 @@ jobs:
       # 60 days, which would silently stop the renewals and lose the note. This
       # commit keeps the schedule alive and doubles as a public, timestamped
       # record that the identity has been continuously maintained.
+      #
+      # The log line is built by node and written straight to the file. Nothing
+      # read from disk is interpolated into a shell command.
       - name: Record the run
         run: |
-          mkdir -p proof
-          echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) keepalive ok  $(node -e "console.log(require('./agent.public.json').did)")" >> proof/keepalive.log
-          tail -n 400 proof/keepalive.log > proof/keepalive.log.tmp && mv proof/keepalive.log.tmp proof/keepalive.log
+          node -e '
+            const fs = require("node:fs");
+            const did = require("./agent.public.json").did;
+            if (!/^did:key:z[1-9A-HJ-NP-Za-km-z]+$/.test(did)) {
+              throw new Error("agent.public.json does not hold a well-formed did:key");
+            }
+            fs.mkdirSync("proof", { recursive: true });
+            const line = `${new Date().toISOString().replace(/\.\d+Z$/, "Z")} keepalive ok  ${did}\n`;
+            const path = "proof/keepalive.log";
+            const kept = (fs.existsSync(path) ? fs.readFileSync(path, "utf8") : "")
+              .split("\n").filter(Boolean).slice(-399).join("\n");
+            fs.writeFileSync(path, (kept ? kept + "\n" : "") + line);
+          '
           git config user.name  "keepalive"
           git config user.email "keepalive@users.noreply.github.com"
           git add proof/keepalive.log
