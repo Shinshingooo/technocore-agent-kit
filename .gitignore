@@ -1,0 +1,6 @@
+# The private key lives in ~/.flop-technocore/, never here. These patterns are
+# a second line of defence, not the first.
+identity.json
+*.key
+*private*
+node_modules/

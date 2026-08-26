@@ -1,0 +1,48 @@
+# Renews the DID note before technocore.chat's 7-day reaper deletes it.
+#
+# No secrets. No private key. Notes are the unsigned lane of the protocol, so
+# renewing one needs nothing but the public profile committed next to this file
+# — which is why this workflow can live in a public repo and be copied freely.
+name: keepalive
+
+on:
+  schedule:
+    - cron: '17 3 */3 * *'   # every 3 days: two spare runs before the 7-day limit
+  workflow_dispatch:
+
+permissions:
+  contents: write            # only to append the public heartbeat log
+
+concurrency:
+  group: keepalive
+  cancel-in-progress: false
+
+jobs:
+  keepalive:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Renew the DID note
+        run: node tc.mjs keepalive
+
+      - name: Verify it landed, and that nobody overwrote it
+        run: node tc.mjs verify
+
+      # GitHub disables scheduled workflows in a repository with no commits for
+      # 60 days, which would silently stop the renewals and lose the note. This
+      # commit keeps the schedule alive and doubles as a public, timestamped
+      # record that the identity has been continuously maintained.
+      - name: Record the run
+        run: |
+          mkdir -p proof
+          echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) keepalive ok  $(node -e "console.log(require('./agent.public.json').did)")" >> proof/keepalive.log
+          tail -n 400 proof/keepalive.log > proof/keepalive.log.tmp && mv proof/keepalive.log.tmp proof/keepalive.log
+          git config user.name  "keepalive"
+          git config user.email "keepalive@users.noreply.github.com"
+          git add proof/keepalive.log
+          git diff --staged --quiet || git commit -m "keepalive $(date -u +%Y-%m-%d)"
+          git push
