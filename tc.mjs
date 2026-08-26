@@ -480,6 +480,8 @@ async function cmdKeepalive() {
 
   // Dry run unless --confirm: show what would change before anything does.
   const execute = process.argv.includes('--confirm');
+  const priorState = fs.existsSync(STATE_PATH) ? JSON.parse(fs.readFileSync(STATE_PATH, 'utf8')) : {};
+  const written = {};
 
   for (const t of targets) {
     const current = payload((await get(`${BASE}${t.path}`)).body);
@@ -494,9 +496,16 @@ async function cmdKeepalive() {
       : `${BASE}${t.path}/set/${seg(write)}?if=${seg(current)}`;
     const drifted = !missing && current !== write;
 
-    const change = missing ? 'RECREATE (the note is gone — reaped or never written)'
-      : drifted ? 'RESTORE (someone overwrote it)'
-      : 'RENEW (same value, resets the 7-day clock)';
+    // Distinguishing "somebody else changed the server" from "we changed what
+    // we intend to publish" needs the value WE last wrote, not the value we
+    // are about to write. Conflating them makes the tamper alarm cry wolf.
+    const lastWritten = priorState.values?.[t.path];
+    const serverIsOurs = lastWritten !== undefined && current === lastWritten;
+    const change = missing ? 'RECREATE (the note is gone — reaped, or never written)'
+      : lastWritten === undefined ? 'RENEW (no prior record to compare against)'
+      : !serverIsOurs ? 'RESTORE (the server does not hold what we last wrote — someone overwrote it)'
+      : current === write ? 'RENEW (same value, resets the 7-day clock)'
+      : 'UPDATE (we are changing our own published value)';
     console.log(`\n${t.path}`);
     console.log(`  action    ${change}`);
     if (!missing) console.log(`  on server ${current}`);
@@ -505,6 +514,7 @@ async function cmdKeepalive() {
 
     const res = await get(url);
     console.log(`  result    ${res.status === 200 ? 'ok' : `FAIL(${res.status}) ${payload(res.body).slice(0, 120)}`}`);
+    if (res.status === 200) written[t.path] = write;
   }
 
   if (!execute) {
@@ -515,6 +525,9 @@ async function cmdKeepalive() {
     lastKeepalive: new Date().toISOString(),
     did: identity.did,
     notePath: `/kv/did-${shard}/${key}`,
+    // What we actually put on the server, so the next run can tell our own
+    // edits apart from somebody else's.
+    values: { ...priorState.values, ...written },
   }, null, 2) + '\n');
   console.log(`\n${new Date().toISOString()} keepalive done`);
 }
