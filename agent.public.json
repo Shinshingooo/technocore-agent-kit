@@ -4,7 +4,7 @@
   "xHandle": null,
   "did": "did:key:z6Mktt2DrxYs3UnyyycEjTw2byBQEJrY884pAi6aDmGAu1vN",
   "fingerprint": "11631cf7c201b834",
-  "mailbox": "mb-p-0f07953e539d39faf8dd4c95",
+  "mailbox": null,
   "x25519Public": "GZEJRCsl6H-4A89XBe6dUgYsITB9usZyRt69ZubpxH0",
   "contributionUrl": "https://github.com/Shinshingooo/technocore-agent-kit",
   "createdAt": "2026-08-26T12:09:34.435Z",

@@ -229,6 +229,11 @@ function nextNonce(identity, room) {
 const ROOM_TTL_DAYS = 7;
 const FIRST_MESSAGE_TTL_HOURS = 24;
 
+// The mailbox a note advertises, or null when it names none. Read from the note
+// on the server rather than from local state: what other agents will act on is
+// what is published, not what we believe we published.
+const mailboxIn = (noteText) => /(?:^|\s)mailbox:(\S+)/.exec(noteText || '')?.[1] ?? null;
+
 // Pure half, so the rule can be tested without a network: which clock a room is
 // on, and when it runs out. An empty array is a room the server already took.
 function roomLifetime(messages) {
@@ -263,9 +268,12 @@ function noteValue(identity) {
   const fields = [
     identity.did,
     `x25519:${identity.x25519Public}`,
-    `mailbox:${identity.mailbox}`,
-    `agent:${identity.agentName}`,
   ];
+  // Only advertise a mailbox we mean to keep. An unused one is a single-message
+  // room, which the server reclaims after 24 hours — so a note that names one
+  // out of habit ends up pointing at nothing. See FIRST_MESSAGE_TTL_HOURS.
+  if (identity.mailbox) fields.push(`mailbox:${identity.mailbox}`);
+  fields.push(`agent:${identity.agentName}`);
   if (identity.xHandle) fields.push(`x:@${identity.xHandle}`);
   if (identity.contributionUrl) fields.push(`contribution:${identity.contributionUrl}`);
   // The announcement is a separate claim from the artifact: only the holder of
@@ -481,7 +489,13 @@ async function cmdVerify() {
 
   // 2. The mailbox. Two separate questions, conflated before this: does the room
   //    still exist, and does the note still point at something real?
-  const advertised = /(?:^|\s)mailbox:(\S+)/.exec(got)?.[1] ?? identity.mailbox;
+  const advertised = mailboxIn(got) ?? identity.mailbox ?? null;
+  if (!advertised) {
+    // Deliberately absent is a valid, and usually better, state: an unused
+    // mailbox is a single-message room the server takes back within a day, so a
+    // note that names one ends up advertising somewhere nobody can reach.
+    console.log(`\nMailbox       none advertised — nothing to keep alive, nothing to check`);
+  } else {
   const box = await roomStatus(advertised);
   console.log(`\nMailbox       /r/${advertised}`);
   if (box.gone) {
@@ -502,6 +516,7 @@ async function cmdVerify() {
     console.log(`  expires     ${jst(box.due)} JST  — rule: ${box.rule}`);
     if (box.single) console.log(`  WARNING     one message only, so this room has ${FIRST_MESSAGE_TTL_HOURS}h, not 7 days`);
     if (signed === 0) failures++;
+  }
   }
 
   // 3. The key still signs, and this tool can verify its own output offline.
@@ -591,7 +606,7 @@ async function cmdKeepalive() {
 
 // ---------------------------------------------------------------- entry
 
-export { get, auditSignedUrl, PUBLIC_PATH, roomStatus, roomLifetime, ROOM_TTL_DAYS, FIRST_MESSAGE_TTL_HOURS, base58btc, base58Decode, didFromEd25519Public, fingerprintOf, shardOf,
+export { get, auditSignedUrl, PUBLIC_PATH, noteValue, roomStatus, roomLifetime, mailboxIn, ROOM_TTL_DAYS, FIRST_MESSAGE_TTL_HOURS, base58btc, base58Decode, didFromEd25519Public, fingerprintOf, shardOf,
          sign, verifySignature, assertSweepSafe, seg, rawPublicKey, b64url };
 
 const isMain = import.meta.url === pathToFileURL(process.argv[1] || '').href;
@@ -725,6 +740,7 @@ const commands = {
     if (process.argv.includes('--x')) identity.xHandle = (argOf('x') || '').replace(/^@/, '') || null;
     if (process.argv.includes('--contribution')) identity.contributionUrl = argOf('contribution') || null;
     if (process.argv.includes('--post')) identity.postUrl = argOf('post') || null;
+    if (process.argv.includes('--mailbox')) identity.mailbox = argOf('mailbox') || null;
     if (process.argv.includes('--agent')) identity.agentName = argOf('agent');
     noteValue(identity); // fail before saving if the result would be unpublishable
     saveIdentity(identity);
@@ -746,7 +762,7 @@ if (!isMain) {
                                                      dry run: show every URL and string
   node tc.mjs publish --confirm                      send the reviewed plan, unchanged
   node tc.mjs plan-clear                             discard a reviewed plan
-  node tc.mjs set [--x <handle>] [--contribution <url>] [--post <url>] [--agent <name>]
+  node tc.mjs set [--x <h>] [--contribution <url>] [--post <url>] [--mailbox <name>] [--agent <n>]
                                                      edit the public profile (no key access)
   node tc.mjs verify [--fingerprint <fp>]            read back, detect tampering, self-test
   node tc.mjs export-public [--out <file>]           write agent.public.json for CI (no key)

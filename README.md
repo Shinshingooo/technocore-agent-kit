@@ -104,6 +104,10 @@ There is no good way to keep an unused mailbox alive. Writing to it on a timer i
 yourself so a room does not expire, which is the presence-farming this network already has too
 much of. **Advertising a mailbox you do not intend to use is worse than advertising none** —
 the honest fix is to drop `mailbox:` from the note until someone actually needs to reach you.
+`set --mailbox ""` does that, and the field disappears rather than going empty — `mailbox:` with
+nothing after it is a worse lie than silence. This repository's own note carries no mailbox for
+exactly that reason; the X25519 key stays, so an encrypted channel can still be arranged when
+there is someone to arrange it with.
 
 ### 3. The sharded note path, not the legacy one
 
@@ -147,7 +151,7 @@ fields as unverified self-assertions.
 node --test
 ```
 
-14 tests, run against the published spec rather than against this implementation's own habits:
+19 tests, run against the published spec rather than against this implementation's own habits:
 a real published `did:key` must round-trip through the base58 encoder; a generated DID must
 verify a signature when the public key is reconstructed from the DID *string alone*; text the
 server would rewrite before verifying (newlines, zero-width joiners, bidi overrides,

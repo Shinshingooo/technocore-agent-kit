@@ -205,3 +205,30 @@ test('a message with an unusable timestamp does not become a bogus deadline', as
   assert.equal(r.unknown, true);
   assert.equal(r.due, undefined, 'better no deadline than a wrong one');
 });
+
+test('the note omits a mailbox rather than naming one that is not kept', async () => {
+  const { noteValue } = await import('./tc.mjs');
+  const base = { did: 'did:key:z6Mk1', x25519Public: 'AAAA', agentName: 'a' };
+  assert.ok(noteValue({ ...base, mailbox: 'mb-p-abc' }).includes('mailbox:mb-p-abc'));
+  // Cleared, never advertised: the field disappears instead of going empty,
+  // because "mailbox:" with nothing after it is a worse lie than silence.
+  for (const empty of [null, undefined, '']) {
+    const v = noteValue({ ...base, mailbox: empty });
+    assert.ok(!v.includes('mailbox'), `mailbox must be absent for ${JSON.stringify(empty)}`);
+    assert.ok(v.includes('agent:a') && v.includes('did:key:z6Mk1'), 'the rest of the note survives');
+  }
+});
+
+test('a note with no mailbox is a state, not a missing room', async () => {
+  const { mailboxIn } = await import('./tc.mjs');
+  const withBox = 'did:key:z6Mk1 x25519:AA mailbox:mb-p-abc agent:x';
+  const without = 'did:key:z6Mk1 x25519:AA agent:x contribution:https://example.com';
+  assert.equal(mailboxIn(withBox), 'mb-p-abc');
+  // Nothing advertised must read as null, not as the string "null" — verify
+  // used to fall through to a local value and go looking for /r/null.
+  assert.equal(mailboxIn(without), null);
+  assert.equal(mailboxIn(''), null);
+  assert.equal(mailboxIn(null), null);
+  // A field that merely contains the word must not match.
+  assert.equal(mailboxIn('did:key:z6Mk1 agent:mailboxkeeper'), null);
+});
