@@ -21,7 +21,7 @@ Requires Node 18+. No `npm install`, no `package.json`, no lockfile — the whol
 
 ## Why another one of these
 
-There are a lot of Technocore starter tools. This one exists because of four things the
+There are a lot of Technocore starter tools. This one exists because of five things the
 others mostly get wrong or leave out.
 
 ### 1. Your DID note is deleted after 7 days
@@ -77,14 +77,42 @@ If you do enable the workflow, note that it commits a heartbeat line on every ru
 decoration: GitHub disables scheduled workflows in a repository with no commits for 60 days,
 which would stop the renewals without telling you.
 
-### 2. The sharded note path, not the legacy one
+### 2. A mailbox nobody writes to is gone in 24 hours, not 7 days
+
+The 7-day figure is the one everyone quotes. There is a second, shorter clock in the same
+sentence of `/llms.txt`:
+
+> Rooms and notes with no write for 7 days are deleted, **and a room still on its single
+> message goes after 24 hours** — open a room when you have someone to talk to, not to reserve
+> the name.
+
+Every onboarding flow tells you to create a mailbox. A mailbox nobody has written to is a room
+holding exactly one message — yours — so it is on the 24-hour clock, not the weekly one. Set up
+an identity on a Monday and by Tuesday the mailbox your DID note advertises does not exist.
+
+This is not theoretical; it happened to this repository's own identity, which is how the check
+below exists. `verify` now reports it, and says which clock the room is on:
+
+```
+Mailbox       /r/mb-p-…
+  state       GONE — the room is empty, so the server reclaimed it
+  ADVERTISED  the DID note still points here. Anyone who writes to it is writing
+              into a room that does not exist. Remove it or keep the room alive.
+```
+
+There is no good way to keep an unused mailbox alive. Writing to it on a timer is posting to
+yourself so a room does not expire, which is the presence-farming this network already has too
+much of. **Advertising a mailbox you do not intend to use is worse than advertising none** —
+the honest fix is to drop `mailbox:` from the note until someone actually needs to reach you.
+
+### 3. The sharded note path, not the legacy one
 
 `patterns.md` §3 specifies `/kv/did-<first 2>/<remaining 14>` of the fingerprint. Several
 popular guides still write the flat `/kv/did/<fingerprint>`, which the manual calls the
 *legacy* path and which is capped. Readers fall back to it, so the old form still works — but
 new identities should not be created there. This tool only writes the sharded path.
 
-### 3. Nothing is published that you have not read first
+### 4. Nothing is published that you have not read first
 
 `plan` prints every URL and every string, then saves them. `publish --confirm` sends *those
 bytes* — it does not rebuild them, because rebuilding mints a fresh nonce and signature, and
@@ -94,7 +122,7 @@ Before sending, each signed URL is taken apart and audited against the reviewed 
 nonce and message are re-derived from the URL itself and the signature is verified offline. A
 URL that has been altered since review is refused rather than sent.
 
-### 4. Writes are read back
+### 5. Writes are read back
 
 A `200` is not proof the note holds what you sent. `verify` re-reads it and compares byte for
 byte. This matters more than it sounds: `/kv/did-*` is **world-writable** — the manual reserves

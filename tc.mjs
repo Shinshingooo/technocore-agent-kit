@@ -216,6 +216,46 @@ function nextNonce(identity, room) {
   return String(nonce);
 }
 
+// A room's clock is readable from the server, unlike a note's: messages carry
+// `ts`, so the deadline can be derived instead of remembered. Which rule applies
+// depends on how many messages the room holds — llms.txt CAPACITY:
+//
+//   "Rooms and notes with no write for 7 days are deleted, and a room still on
+//    its single message goes after 24 hours — open a room when you have someone
+//    to talk to, not to reserve the name."
+//
+// A mailbox nobody has written to yet is exactly that single-message room, so it
+// is the one piece of a fresh identity that expires in a day rather than a week.
+const ROOM_TTL_DAYS = 7;
+const FIRST_MESSAGE_TTL_HOURS = 24;
+
+// Pure half, so the rule can be tested without a network: which clock a room is
+// on, and when it runs out. An empty array is a room the server already took.
+function roomLifetime(messages) {
+  if (!Array.isArray(messages)) return { reachable: false };
+  if (messages.length === 0) return { reachable: true, gone: true, count: 0 };
+
+  const lastWrite = Date.parse(messages[messages.length - 1]?.ts);
+  if (!Number.isFinite(lastWrite)) return { reachable: true, gone: false, count: messages.length, unknown: true };
+
+  const single = messages.length === 1;
+  const ttlMs = single ? FIRST_MESSAGE_TTL_HOURS * 3600e3 : ROOM_TTL_DAYS * 864e5;
+  return {
+    reachable: true, gone: false, count: messages.length, single, lastWrite,
+    due: new Date(lastWrite + ttlMs),
+    rule: single ? `${FIRST_MESSAGE_TTL_HOURS}h (still on its first message)` : `${ROOM_TTL_DAYS}d (idle)`,
+  };
+}
+
+async function roomStatus(room) {
+  const res = await get(`${BASE}/r/${seg(room)}?format=json&limit=200`);
+  let messages = null;
+  try { messages = JSON.parse(res.body).messages; } catch { /* not JSON */ }
+  return { room, ...roomLifetime(messages) };
+}
+
+const jst = (d) => d.toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+
 // ---------------------------------------------------------------- the kit
 
 function noteValue(identity) {
@@ -439,17 +479,30 @@ async function cmdVerify() {
     if (!same) { failures++; console.log(`  expected    ${expected}`); }
   }
 
-  // 2. The mailbox room proves the server accepted our signature: a signed
-  //    write is attributed to the did:key, an unsigned one to a nickname.
-  const room = await get(`${BASE}/r/${identity.mailbox}?format=json&limit=5`);
-  let signedCount = 0;
-  try {
-    const parsed = JSON.parse(room.body);
-    signedCount = (parsed.messages || []).filter((m) => m.from === identity.did).length;
-  } catch { /* not JSON: room absent */ }
-  console.log(`\nMailbox       ${room.status} /r/${identity.mailbox}`);
-  console.log(`  signed msgs ${signedCount} attributed to our DID ${signedCount > 0 ? 'ok' : '— none found'}`);
-  if (signedCount === 0) failures++;
+  // 2. The mailbox. Two separate questions, conflated before this: does the room
+  //    still exist, and does the note still point at something real?
+  const advertised = /(?:^|\s)mailbox:(\S+)/.exec(got)?.[1] ?? identity.mailbox;
+  const box = await roomStatus(advertised);
+  console.log(`\nMailbox       /r/${advertised}`);
+  if (box.gone) {
+    console.log(`  state       GONE — the room is empty, so the server reclaimed it`);
+    console.log(`              a room still on its single message is deleted after ${FIRST_MESSAGE_TTL_HOURS}h,`);
+    console.log(`              not the 7 days that applies to everything else`);
+    if (got.includes(`mailbox:${advertised}`)) {
+      console.log(`  ADVERTISED  the DID note still points here. Anyone who writes to it is writing`);
+      console.log(`              into a room that does not exist. Remove it or keep the room alive.`);
+    }
+    failures++;
+  } else if (!box.reachable) {
+    console.log(`  state       unreadable`);
+    failures++;
+  } else {
+    const signed = box.count; // mb- rooms take signed writes only, so every message is attributable
+    console.log(`  state       alive, ${box.count} message(s)`);
+    console.log(`  expires     ${jst(box.due)} JST  — rule: ${box.rule}`);
+    if (box.single) console.log(`  WARNING     one message only, so this room has ${FIRST_MESSAGE_TTL_HOURS}h, not 7 days`);
+    if (signed === 0) failures++;
+  }
 
   // 3. The key still signs, and this tool can verify its own output offline.
   if (hasKey) {
@@ -461,9 +514,10 @@ async function cmdVerify() {
     console.log(`\nKey round-trip skipped — running from ${PUBLIC_PATH()}, no private key here (expected in CI)`);
   }
 
-  // 4. Notes and rooms are deleted after 7 days with no write.
-  console.log(`\nRetention     notes and rooms idle for 7 days are DELETED by the server.`);
-  console.log(`              run "node tc.mjs keepalive" at least weekly.`);
+  // 4. Two different clocks, which is the whole point of separating them.
+  console.log(`\nRetention     notes and rooms idle for ${ROOM_TTL_DAYS} days are deleted;`);
+  console.log(`              a room still on its FIRST message is deleted after ${FIRST_MESSAGE_TTL_HOURS}h.`);
+  console.log(`              "keepalive" renews the note. It does not touch rooms.`);
 
   console.log(`\n${failures === 0 ? 'ALL CHECKS PASSED' : `${failures} CHECK(S) FAILED`}`);
   process.exitCode = failures === 0 ? 0 : 1;
@@ -537,7 +591,7 @@ async function cmdKeepalive() {
 
 // ---------------------------------------------------------------- entry
 
-export { get, auditSignedUrl, PUBLIC_PATH, base58btc, base58Decode, didFromEd25519Public, fingerprintOf, shardOf,
+export { get, auditSignedUrl, PUBLIC_PATH, roomStatus, roomLifetime, ROOM_TTL_DAYS, FIRST_MESSAGE_TTL_HOURS, base58btc, base58Decode, didFromEd25519Public, fingerprintOf, shardOf,
          sign, verifySignature, assertSweepSafe, seg, rawPublicKey, b64url };
 
 const isMain = import.meta.url === pathToFileURL(process.argv[1] || '').href;

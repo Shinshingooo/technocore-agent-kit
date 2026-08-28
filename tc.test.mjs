@@ -170,3 +170,38 @@ test('the pre-send audit accepts a sound URL and catches every way it can be wro
     assert.ok(auditSignedUrl(identity.did, write), `must reject: ${name}`);
   }
 });
+
+test('a room on its first message is on the 24h clock, not the 7-day one', async () => {
+  const { roomLifetime, ROOM_TTL_DAYS, FIRST_MESSAGE_TTL_HOURS } = await import('./tc.mjs');
+  const at = (iso) => ({ ts: iso, from: 'did:key:z6Mk', text: 'x' });
+  const t0 = '2026-08-26T12:24:12.000Z';
+
+  // llms.txt CAPACITY: "a room still on its single message goes after 24 hours".
+  // A mailbox nobody has replied to is exactly that, which is how one silently
+  // disappeared a day after it was created.
+  const fresh = roomLifetime([at(t0)]);
+  assert.equal(fresh.single, true);
+  assert.equal(fresh.due.toISOString(), new Date(Date.parse(t0) + FIRST_MESSAGE_TTL_HOURS * 3600e3).toISOString());
+
+  // A second message moves it onto the ordinary idle clock.
+  const used = roomLifetime([at(t0), at('2026-08-26T13:00:00.000Z')]);
+  assert.equal(used.single, false);
+  assert.equal(used.due.toISOString(), new Date(Date.parse('2026-08-26T13:00:00.000Z') + ROOM_TTL_DAYS * 864e5).toISOString());
+  assert.ok(used.due - fresh.due > 0, 'the 7-day clock must outlast the 24h one');
+});
+
+test('an empty room is reported as reclaimed, not as an error', async () => {
+  const { roomLifetime } = await import('./tc.mjs');
+  // The server answers 200 with an empty message list for a room it has taken,
+  // and for one that never existed. Both mean "nothing is there".
+  assert.deepEqual(roomLifetime([]), { reachable: true, gone: true, count: 0 });
+  assert.equal(roomLifetime(null).reachable, false);
+  assert.equal(roomLifetime(undefined).reachable, false);
+});
+
+test('a message with an unusable timestamp does not become a bogus deadline', async () => {
+  const { roomLifetime } = await import('./tc.mjs');
+  const r = roomLifetime([{ ts: 'not-a-date', from: 'x', text: 'y' }]);
+  assert.equal(r.unknown, true);
+  assert.equal(r.due, undefined, 'better no deadline than a wrong one');
+});
